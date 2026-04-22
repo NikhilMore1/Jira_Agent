@@ -18,8 +18,15 @@ import argparse
 import os
 import sys
 import requests
+import subprocess
 from dotenv import load_dotenv
 from pathlib import Path
+
+try:
+    from report_generator import ReportGenerator
+    REPORT_GENERATOR_AVAILABLE = True
+except ImportError:
+    REPORT_GENERATOR_AVAILABLE = False
 
 # Load .env from parent directory (project root)
 env_path = Path(__file__).parent.parent / ".env"
@@ -280,6 +287,8 @@ def main():
     parser.add_argument("--draft", action="store_true", help="Create as draft PR")
     parser.add_argument("--owner", default=GITHUB_OWNER, help="GitHub owner/org")
     parser.add_argument("--repo", default=GITHUB_REPO, help="GitHub repository")
+    parser.add_argument("--generate-report", action="store_true", help="Generate PDF report")
+    parser.add_argument("--report-file", default="mr_implementation_report.pdf", help="Report output file")
 
     args = parser.parse_args()
 
@@ -345,9 +354,54 @@ def main():
     # Print confirmation
     print_pr_confirmation(pr_data, labels, assignees, reviewers)
 
+    # Generate report if requested
+    if args.generate_report and REPORT_GENERATOR_AVAILABLE:
+        print("\n📄 Generating Implementation Report...")
+        try:
+            # Get git commit hash
+            git_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode().strip()[:8]
+        except:
+            git_commit = "unknown"
+
+        implementation_details = [
+            f"Created PR: {args.title}",
+            f"Source Branch: {args.head}",
+            f"Target Branch: {args.base}",
+            f"Linked Jira Issue: {args.jira_issue}" if args.jira_issue else "No Jira issue linked",
+            f"Labels: {', '.join(labels)}" if labels else "No labels added",
+            f"Reviewers: {', '.join(reviewers)}" if reviewers else "No reviewers assigned",
+            "Implementation complete and ready for review"
+        ]
+
+        if args.changes:
+            implementation_details.extend([c.strip() for c in args.changes.split(',')])
+
+        generator = ReportGenerator()
+        report_success = generator.generate_report(
+            title=args.title,
+            user_story=args.jira_issue or "Not specified",
+            pr_url=pr_data.get('html_url', ''),
+            pr_number=pr_number,
+            implementation_details=implementation_details,
+            git_commit=git_commit,
+            output_file=args.report_file
+        )
+
+        if report_success:
+            print(f"\n✅ Report saved as: {args.report_file}")
+        else:
+            print("\n⚠️  Report generation failed (reportlab may not be installed)")
+            print("   Install with: pip install reportlab")
+    elif args.generate_report and not REPORT_GENERATOR_AVAILABLE:
+        print("\n⚠️  Report generation requested but reportlab not available")
+        print("   Install with: pip install reportlab")
+
     return pr_data
 
 
 if __name__ == "__main__":
     main()
+
+
+
 
